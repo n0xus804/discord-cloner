@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  FIXED: РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
+//  ULTIMATE FIX — РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -302,25 +302,6 @@ async function stopClone() {
     document.getElementById('stopBtn').disabled = true;
     document.getElementById('stopBtn').textContent = '⏹ ОСТАНОВКА...';
     log('⏹ Остановка...', 'running');
-}
-
-// ===== КОНВЕРТАЦИЯ ПРАВ (С ПОДСТАНОВКОЙ НОВЫХ ID РОЛЕЙ) =====
-function convertPerms(overwrites) {
-    const result = [];
-    for (const ow of overwrites) {
-        let id = ow.id;
-        // Если это роль (type === 0) и есть в roleMap — заменяем ID
-        if (ow.type === 0 && roleMap[ow.id]) {
-            id = roleMap[ow.id];
-        }
-        result.push({
-            id: id,
-            type: ow.type,
-            allow: ow.allow || '0',
-            deny: ow.deny || '0'
-        });
-    }
-    return result;
 }
 
 async function startClone() {
@@ -409,11 +390,10 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ (СОРТИРОВКА И ПЕРЕСТАНОВКА) =====
+        // ===== 4. РОЛИ =====
         if (settings.roles && !shouldStop) {
             log('🔄 [2/7] Копирование ролей...');
 
-            // Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -429,12 +409,10 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // СОРТИРУЕМ от младших к старшим
             const sorted = roles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => a.position - b.position);
 
-            // СОЗДАЁМ РОЛИ
             let count = 0;
             for (const r of sorted) {
                 if (shouldStop) throw new Error('STOP');
@@ -456,7 +434,7 @@ async function startClone() {
             }
             log(`✅ Создано ${count} ролей`);
 
-            // ===== ПРИНУДИТЕЛЬНАЯ ПЕРЕСТАНОВКА =====
+            // Принудительная перестановка
             devLog('🔄 Принудительная перестановка ролей...');
             const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
@@ -518,7 +496,6 @@ async function startClone() {
         if ((settings.channels || settings.voice) && !shouldStop) {
             log('🔄 [4/7] Копирование каналов с правами...');
 
-            // Получаем созданные категории для маппинга
             const newChannels = await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -537,34 +514,51 @@ async function startClone() {
                 if (shouldStop) throw new Error('STOP');
                 if (!types.includes(ch.type)) continue;
 
-                // Находим ID родительской категории по имени
                 let parentId = null;
                 if (ch.parent_id) {
                     const parent = channels.find(c => c.id === ch.parent_id);
-                    if (parent) parentId = catMap[parent.name];
+                    if (parent && catMap[parent.name]) {
+                        parentId = catMap[parent.name];
+                    }
                 }
 
-                // КОНВЕРТИРУЕМ ПРАВА
-                const perms = convertPerms(ch.permission_overwrites || []);
-                devLog(`🔑 Права для ${ch.name}: ${perms.length} записей`);
+                // === ПРАВА КАНАЛА ===
+                const overwrites = [];
+                if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
+                    for (const ow of ch.permission_overwrites) {
+                        let targetId = ow.id;
+                        if (ow.type === 0 && roleMap[ow.id]) {
+                            targetId = roleMap[ow.id];
+                        }
+                        overwrites.push({
+                            id: targetId,
+                            type: ow.type,
+                            allow: ow.allow || '0',
+                            deny: ow.deny || '0'
+                        });
+                    }
+                }
+
+                const body = {
+                    name: ch.name,
+                    type: ch.type,
+                    parent_id: parentId,
+                    position: ch.position,
+                    topic: ch.topic || '',
+                    bitrate: ch.bitrate || 64000,
+                    user_limit: ch.user_limit || 0,
+                    nsfw: ch.nsfw || false,
+                    permission_overwrites: overwrites
+                };
+
+                devLog(`📝 ${ch.name} → ${overwrites.length} прав`);
 
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
                     headers: { Authorization: token, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: ch.name,
-                        type: ch.type,
-                        parent_id: parentId,
-                        position: ch.position,
-                        topic: ch.topic || '',
-                        bitrate: ch.bitrate || 64000,
-                        user_limit: ch.user_limit || 0,
-                        nsfw: ch.nsfw || false,
-                        permission_overwrites: perms
-                    })
+                    body: JSON.stringify(body)
                 });
                 count++;
-                devLog(`✅ Канал: ${ch.name} (${ch.type === 0 ? 'текстовый' : 'голосовой'})`);
                 await sleep(300);
             }
             log(`✅ Создано ${count} каналов с правами`);
