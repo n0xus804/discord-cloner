@@ -238,16 +238,13 @@
 </div>
 
 <script>
-// ============ ФУНКЦИЯ ЗАДЕРЖКИ ============
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// ============ КНОПКИ ============
 document.getElementById('startBtn').addEventListener('click', startClone);
 document.getElementById('stopBtn').addEventListener('click', stopClone);
 
-// ============ DEV-РЕЖИМ ============
 document.getElementById('title').addEventListener('dblclick', function() {
     let devMode = document.getElementById('devTabBtn').style.display !== 'none';
     devMode = !devMode;
@@ -257,7 +254,6 @@ document.getElementById('title').addEventListener('dblclick', function() {
     }
 });
 
-// ============ ВКЛАДКИ ============
 document.getElementById('userTabBtn').addEventListener('click', function() {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('userLog').style.display = 'block';
@@ -272,7 +268,6 @@ document.getElementById('devTabBtn').addEventListener('click', function() {
     this.classList.add('active');
 });
 
-// ============ ЛОГГЕРЫ ============
 function userLog(message, type) {
     const container = document.getElementById('userLog');
     const dot = container.querySelector('.status-dot');
@@ -291,7 +286,6 @@ function devLog(message) {
     container.scrollTop = container.scrollHeight;
 }
 
-// ============ СТОП ============
 async function stopClone() {
     window.shouldStop = true;
     document.getElementById('stopBtn').disabled = true;
@@ -299,7 +293,6 @@ async function stopClone() {
     userLog('⏹ Остановка...', 'running');
 }
 
-// ============ КОНВЕРТАЦИЯ ПРАВ ============
 function convertOverwrites(overwrites, roleMap) {
     const newOverwrites = [];
     for (const ow of overwrites) {
@@ -317,345 +310,12 @@ function convertOverwrites(overwrites, roleMap) {
     return newOverwrites;
 }
 
-// ============ СТАРТ ============
+// ========================================================
+//  ГЛАВНАЯ ФУНКЦИЯ
+// ========================================================
 async function startClone() {
     if (window.isRunning) return;
 
     const settings = {
         roles: document.getElementById('copyRoles').checked,
-        channels: document.getElementById('copyChannels').checked,
-        categories: document.getElementById('copyCategories').checked,
-        voice: document.getElementById('copyVoice').checked,
-        emojis: document.getElementById('copyEmojis').checked,
-        settings: document.getElementById('copySettings').checked,
-        icon: document.getElementById('copyIcon').checked,
-        automod: document.getElementById('copyAutoMod').checked
-    };
-
-    const token = document.getElementById('token').value.trim();
-    const sourceId = document.getElementById('source').value.trim();
-    const targetId = document.getElementById('target').value.trim();
-
-    if (!token || !sourceId || !targetId) {
-        userLog('❌ Заполните все поля!', 'error');
-        return;
-    }
-
-    window.isRunning = true;
-    window.shouldStop = false;
-    document.getElementById('startBtn').disabled = true;
-    document.getElementById('startBtn').textContent = '⏳ РАБОТА...';
-    document.getElementById('stopBtn').className = 'btn btn-stop show';
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('stopBtn').textContent = '⏹ СТОП';
-
-    userLog('⏳ Инициализация...', 'running');
-
-    try {
-        // ===== 1. АВТОРИЗАЦИЯ =====
-        const test = await fetch('https://discord.com/api/v10/users/@me', {
-            headers: { 'Authorization': token }
-        });
-        if (!test.ok) {
-            userLog('❌ Неверный токен!', 'error');
-            throw new Error('Invalid token');
-        }
-        const user = await test.json();
-        userLog('✅ Авторизован: ' + user.username + '#' + user.discriminator);
-
-        // ===== 2. ЗАГРУЗКА ДАННЫХ =====
-        if (window.shouldStop) throw new Error('STOPPED');
-        userLog('📥 Загрузка данных с исходного сервера...');
-
-        const sourceGuild = await fetch(`https://discord.com/api/v10/guilds/${sourceId}`, {
-            headers: { 'Authorization': token }
-        }).then(r => r.json());
-
-        if (sourceGuild.code === 10004) {
-            userLog('❌ Сервер-источник не найден!', 'error');
-            throw new Error('Source not found');
-        }
-
-        const roles = await fetch(`https://discord.com/api/v10/guilds/${sourceId}/roles`, {
-            headers: { 'Authorization': token }
-        }).then(r => r.json());
-
-        const channels = await fetch(`https://discord.com/api/v10/guilds/${sourceId}/channels`, {
-            headers: { 'Authorization': token }
-        }).then(r => r.json());
-
-        let emojis = [];
-        if (settings.emojis) {
-            emojis = await fetch(`https://discord.com/api/v10/guilds/${sourceId}/emojis`, {
-                headers: { 'Authorization': token }
-            }).then(r => r.json());
-        }
-
-        userLog(`✅ Загружено: ${roles.length} ролей, ${channels.length} каналов, ${emojis.length} эмодзи`);
-
-        // ===== 3. ИКОНКА =====
-        if (settings.icon && sourceGuild.icon && !window.shouldStop) {
-            userLog('🔄 [1/7] Копирование иконки...');
-            const iconData = await fetch(`https://cdn.discordapp.com/icons/${sourceId}/${sourceGuild.icon}.png`)
-                .then(r => r.arrayBuffer());
-            const base64 = btoa(String.fromCharCode(...new Uint8Array(iconData)));
-            await fetch(`https://discord.com/api/v10/guilds/${targetId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    name: sourceGuild.name,
-                    icon: `data:image/png;base64,${base64}`
-                })
-            });
-            userLog('✅ Иконка скопирована');
-        }
-
-        // ===== 4. РОЛИ =====
-        let roleMap = {};
-        if (settings.roles && !window.shouldStop) {
-            userLog('🔄 [2/7] Копирование ролей с сохранением порядка...');
-            
-            // Удаляем старые роли
-            const targetRoles = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
-                headers: { 'Authorization': token }
-            }).then(r => r.json());
-
-            for (const role of targetRoles) {
-                if (role.name !== '@everyone') {
-                    await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles/${role.id}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': token }
-                    });
-                    await sleep(300);
-                }
-            }
-
-            // Сортируем от младших к старшим
-            const sortedRoles = roles
-                .filter(r => r.name !== '@everyone')
-                .sort((a, b) => a.position - b.position);
-
-            // Создаём роли
-            for (const role of sortedRoles) {
-                if (window.shouldStop) throw new Error('STOPPED');
-                
-                const newRole = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
-                    method: 'POST',
-                    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: role.name,
-                        color: role.color,
-                        hoist: role.hoist,
-                        mentionable: role.mentionable,
-                        permissions: role.permissions
-                    })
-                }).then(r => r.json());
-                
-                roleMap[role.id] = newRole.id;
-                await sleep(300);
-            }
-
-            // Обновляем позиции
-            const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
-                headers: { 'Authorization': token }
-            }).then(r => r.json());
-
-            const sortedCreated = createdRoles
-                .filter(r => r.name !== '@everyone')
-                .sort((a, b) => {
-                    const posA = roles.find(r => r.name === a.name)?.position || 0;
-                    const posB = roles.find(r => r.name === b.name)?.position || 0;
-                    return posA - posB;
-                });
-
-            let position = 0;
-            for (const role of sortedCreated) {
-                await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles/${role.id}`, {
-                    method: 'PATCH',
-                    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ position: position })
-                });
-                position++;
-                await sleep(300);
-            }
-
-            userLog(`✅ Скопировано ${sortedRoles.length} ролей с сохранением порядка`);
-        }
-
-        // ===== 5. КАТЕГОРИИ =====
-        if (settings.categories && !window.shouldStop) {
-            userLog('🔄 [3/7] Копирование категорий...');
-            
-            const targetChannels = await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
-                headers: { 'Authorization': token }
-            }).then(r => r.json());
-
-            for (const ch of targetChannels) {
-                await fetch(`https://discord.com/api/v10/channels/${ch.id}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': token }
-                });
-                await sleep(300);
-            }
-
-            for (const ch of channels) {
-                if (ch.type === 4) {
-                    await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
-                        method: 'POST',
-                        headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ 
-                            name: ch.name, 
-                            type: 4, 
-                            position: ch.position 
-                        })
-                    });
-                    userLog(`✅ Категория: ${ch.name}`);
-                    await sleep(300);
-                }
-            }
-        }
-
-        // ===== 6. КАНАЛЫ С ПРАВАМИ =====
-        if ((settings.channels || settings.voice) && !window.shouldStop) {
-            userLog('🔄 [4/7] Копирование каналов с правами...');
-            
-            const newChannels = await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
-                headers: { 'Authorization': token }
-            }).then(r => r.json());
-            
-            const nameToId = {};
-            for (const nc of newChannels) {
-                if (nc.type === 4) nameToId[nc.name] = nc.id;
-            }
-
-            const types = [];
-            if (settings.channels) types.push(0, 5);
-            if (settings.voice) types.push(2);
-
-            let count = 0;
-            for (const ch of channels) {
-                if (window.shouldStop) throw new Error('STOPPED');
-                if (!types.includes(ch.type)) continue;
-                
-                const parentId = ch.parent_id ? nameToId[channels.find(c => c.id === ch.parent_id)?.name] : null;
-                const overwrites = convertOverwrites(ch.permission_overwrites || [], roleMap);
-                
-                await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
-                    method: 'POST',
-                    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: ch.name,
-                        type: ch.type,
-                        parent_id: parentId,
-                        position: ch.position,
-                        topic: ch.topic || '',
-                        bitrate: ch.bitrate || 64000,
-                        user_limit: ch.user_limit || 0,
-                        nsfw: ch.nsfw || false,
-                        permission_overwrites: overwrites
-                    })
-                });
-                count++;
-                if (count % 5 === 0) {
-                    userLog(`⏳ Создано каналов: ${count}...`);
-                }
-                await sleep(300);
-            }
-            userLog(`✅ Создано ${count} каналов с правами`);
-        }
-
-        // ===== 7. ЭМОДЗИ =====
-        if (settings.emojis && emojis.length > 0 && !window.shouldStop) {
-            userLog(`🔄 [5/7] Копирование ${emojis.length} эмодзи...`);
-            let count = 0;
-            for (const emoji of emojis) {
-                if (window.shouldStop) throw new Error('STOPPED');
-                try {
-                    const img = await fetch(`https://cdn.discordapp.com/emojis/${emoji.id}.${emoji.animated ? 'gif' : 'png'}`)
-                        .then(r => r.arrayBuffer());
-                    const base64 = btoa(String.fromCharCode(...new Uint8Array(img)));
-                    await fetch(`https://discord.com/api/v10/guilds/${targetId}/emojis`, {
-                        method: 'POST',
-                        headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            name: emoji.name,
-                            image: `data:image/${emoji.animated ? 'gif' : 'png'};base64,${base64}`
-                        })
-                    });
-                    count++;
-                    await sleep(500);
-                } catch (e) {
-                    devLog(`⚠️ Эмодзи ${emoji.name} не скопирован`);
-                }
-            }
-            userLog(`✅ Скопировано ${count} эмодзи`);
-        }
-
-        // ===== 8. НАСТРОЙКИ =====
-        if (settings.settings && !window.shouldStop) {
-            userLog('🔄 [6/7] Копирование настроек...');
-            await fetch(`https://discord.com/api/v10/guilds/${targetId}`, {
-                method: 'PATCH',
-                headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    verification_level: sourceGuild.verification_level || 0,
-                    default_message_notifications: sourceGuild.default_message_notifications || 0,
-                    explicit_content_filter: sourceGuild.explicit_content_filter || 0,
-                    afk_timeout: sourceGuild.afk_timeout || 300
-                })
-            });
-            userLog('✅ Настройки скопированы');
-        }
-
-        // ===== 9. AUTOMOD =====
-        if (settings.automod && !window.shouldStop) {
-            userLog('🔄 [7/7] Копирование AutoMod...');
-            try {
-                const rules = await fetch(`https://discord.com/api/v10/guilds/${sourceId}/automod/rules`, {
-                    headers: { 'Authorization': token }
-                }).then(r => r.json());
-                
-                if (Array.isArray(rules) && rules.length > 0) {
-                    for (const rule of rules) {
-                        if (window.shouldStop) throw new Error('STOPPED');
-                        await fetch(`https://discord.com/api/v10/guilds/${targetId}/automod/rules`, {
-                            method: 'POST',
-                            headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                name: rule.name,
-                                trigger_type: rule.trigger_type,
-                                trigger_metadata: rule.trigger_metadata || {},
-                                actions: rule.actions || [],
-                                enabled: rule.enabled !== false
-                            })
-                        });
-                        await sleep(500);
-                    }
-                    userLog(`✅ Скопировано ${rules.length} правил AutoMod`);
-                }
-            } catch (e) {
-                userLog('⚠️ AutoMod не поддерживается или нет прав');
-            }
-        }
-
-        userLog('🎉 Клонирование завершено! ВСЁ ПО ПОРЯДКУ, ПРАВА СОХРАНЕНЫ!', 'done');
-
-    } catch (error) {
-        if (error.message === 'STOPPED') {
-            userLog('⏹ Остановлено пользователем', 'error');
-        } else {
-            userLog('❌ Ошибка: ' + error.message, 'error');
-        }
-    }
-
-    window.isRunning = false;
-    window.shouldStop = false;
-    document.getElementById('startBtn').disabled = false;
-    document.getElementById('startBtn').textContent = '▶ СТАРТ';
-    document.getElementById('stopBtn').className = 'btn btn-stop';
-    document.getElementById('stopBtn').disabled = false;
-    document.getElementById('stopBtn').textContent = '⏹ СТОП';
-}
-</script>
-</body>
-</html>
+        channels: document.getElementById('copyChannels').checked
