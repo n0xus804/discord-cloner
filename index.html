@@ -299,11 +299,28 @@ async function stopClone() {
     userLog('⏹ Остановка...', 'running');
 }
 
-// ============ СТАРТ (ГЛАВНАЯ ФУНКЦИЯ) ============
+// ============ КОНВЕРТАЦИЯ ПРАВ ============
+function convertOverwrites(overwrites, roleMap) {
+    const newOverwrites = [];
+    for (const ow of overwrites) {
+        let targetId = ow.id;
+        if (ow.type === 0 && roleMap[ow.id]) {
+            targetId = roleMap[ow.id];
+        }
+        newOverwrites.push({
+            id: targetId,
+            type: ow.type,
+            allow: ow.allow || '0',
+            deny: ow.deny || '0'
+        });
+    }
+    return newOverwrites;
+}
+
+// ============ СТАРТ ============
 async function startClone() {
     if (window.isRunning) return;
 
-    // Собираем настройки
     const settings = {
         roles: document.getElementById('copyRoles').checked,
         channels: document.getElementById('copyChannels').checked,
@@ -346,7 +363,7 @@ async function startClone() {
         const user = await test.json();
         userLog('✅ Авторизован: ' + user.username + '#' + user.discriminator);
 
-        // ===== 2. ЗАГРУЗКА ДАННЫХ С ИСХОДНОГО СЕРВЕРА =====
+        // ===== 2. ЗАГРУЗКА ДАННЫХ =====
         if (window.shouldStop) throw new Error('STOPPED');
         userLog('📥 Загрузка данных с исходного сервера...');
 
@@ -376,7 +393,7 @@ async function startClone() {
 
         userLog(`✅ Загружено: ${roles.length} ролей, ${channels.length} каналов, ${emojis.length} эмодзи`);
 
-        // ===== 3. ИКОНКА ===== (1-й шаг)
+        // ===== 3. ИКОНКА =====
         if (settings.icon && sourceGuild.icon && !window.shouldStop) {
             userLog('🔄 [1/7] Копирование иконки...');
             const iconData = await fetch(`https://cdn.discordapp.com/icons/${sourceId}/${sourceGuild.icon}.png`)
@@ -393,11 +410,12 @@ async function startClone() {
             userLog('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ ===== (2-й шаг) — создаём в правильном порядке (снизу вверх)
+        // ===== 4. РОЛИ =====
+        let roleMap = {};
         if (settings.roles && !window.shouldStop) {
-            userLog('🔄 [2/7] Копирование ролей в правильном порядке...');
+            userLog('🔄 [2/7] Копирование ролей с сохранением порядка...');
             
-            // 4.1 Удаляем старые роли
+            // Удаляем старые роли
             const targetRoles = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
                 headers: { 'Authorization': token }
             }).then(r => r.json());
@@ -412,16 +430,16 @@ async function startClone() {
                 }
             }
 
-            // 4.2 Сортируем роли от самых младших к старшим (по позиции)
+            // Сортируем от младших к старшим
             const sortedRoles = roles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => a.position - b.position);
 
-            let count = 0;
+            // Создаём роли
             for (const role of sortedRoles) {
                 if (window.shouldStop) throw new Error('STOPPED');
                 
-                await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
+                const newRole = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
                     method: 'POST',
                     headers: { 'Authorization': token, 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -429,25 +447,45 @@ async function startClone() {
                         color: role.color,
                         hoist: role.hoist,
                         mentionable: role.mentionable,
-                        permissions: role.permissions,
-                        position: role.position
+                        permissions: role.permissions
                     })
-                });
+                }).then(r => r.json());
                 
-                count++;
-                if (count % 3 === 0) {
-                    userLog(`⏳ Создано ролей: ${count}/${sortedRoles.length}`);
-                }
-                await sleep(200);
+                roleMap[role.id] = newRole.id;
+                await sleep(300);
             }
-            userLog(`✅ Скопировано ${count} ролей в правильном порядке`);
+
+            // Обновляем позиции
+            const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
+                headers: { 'Authorization': token }
+            }).then(r => r.json());
+
+            const sortedCreated = createdRoles
+                .filter(r => r.name !== '@everyone')
+                .sort((a, b) => {
+                    const posA = roles.find(r => r.name === a.name)?.position || 0;
+                    const posB = roles.find(r => r.name === b.name)?.position || 0;
+                    return posA - posB;
+                });
+
+            let position = 0;
+            for (const role of sortedCreated) {
+                await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles/${role.id}`, {
+                    method: 'PATCH',
+                    headers: { 'Authorization': token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ position: position })
+                });
+                position++;
+                await sleep(300);
+            }
+
+            userLog(`✅ Скопировано ${sortedRoles.length} ролей с сохранением порядка`);
         }
 
-        // ===== 5. КАТЕГОРИИ ===== (3-й шаг)
+        // ===== 5. КАТЕГОРИИ =====
         if (settings.categories && !window.shouldStop) {
             userLog('🔄 [3/7] Копирование категорий...');
             
-            // Удаляем старые каналы
             const targetChannels = await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
                 headers: { 'Authorization': token }
             }).then(r => r.json());
@@ -460,11 +498,9 @@ async function startClone() {
                 await sleep(300);
             }
 
-            // Создаём категории
-            const categoryMap = {};
             for (const ch of channels) {
                 if (ch.type === 4) {
-                    const newCat = await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
+                    await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
                         method: 'POST',
                         headers: { 'Authorization': token, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ 
@@ -472,19 +508,17 @@ async function startClone() {
                             type: 4, 
                             position: ch.position 
                         })
-                    }).then(r => r.json());
-                    categoryMap[ch.id] = newCat.id;
+                    });
                     userLog(`✅ Категория: ${ch.name}`);
                     await sleep(300);
                 }
             }
         }
 
-        // ===== 6. КАНАЛЫ ===== (4-й шаг)
+        // ===== 6. КАНАЛЫ С ПРАВАМИ =====
         if ((settings.channels || settings.voice) && !window.shouldStop) {
-            userLog('🔄 [4/7] Копирование каналов...');
+            userLog('🔄 [4/7] Копирование каналов с правами...');
             
-            // Получаем новые категории для маппинга
             const newChannels = await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
                 headers: { 'Authorization': token }
             }).then(r => r.json());
@@ -504,6 +538,7 @@ async function startClone() {
                 if (!types.includes(ch.type)) continue;
                 
                 const parentId = ch.parent_id ? nameToId[channels.find(c => c.id === ch.parent_id)?.name] : null;
+                const overwrites = convertOverwrites(ch.permission_overwrites || [], roleMap);
                 
                 await fetch(`https://discord.com/api/v10/guilds/${targetId}/channels`, {
                     method: 'POST',
@@ -516,7 +551,8 @@ async function startClone() {
                         topic: ch.topic || '',
                         bitrate: ch.bitrate || 64000,
                         user_limit: ch.user_limit || 0,
-                        nsfw: ch.nsfw || false
+                        nsfw: ch.nsfw || false,
+                        permission_overwrites: overwrites
                     })
                 });
                 count++;
@@ -525,10 +561,10 @@ async function startClone() {
                 }
                 await sleep(300);
             }
-            userLog(`✅ Создано ${count} каналов`);
+            userLog(`✅ Создано ${count} каналов с правами`);
         }
 
-        // ===== 7. ЭМОДЗИ ===== (5-й шаг)
+        // ===== 7. ЭМОДЗИ =====
         if (settings.emojis && emojis.length > 0 && !window.shouldStop) {
             userLog(`🔄 [5/7] Копирование ${emojis.length} эмодзи...`);
             let count = 0;
@@ -555,7 +591,7 @@ async function startClone() {
             userLog(`✅ Скопировано ${count} эмодзи`);
         }
 
-        // ===== 8. НАСТРОЙКИ ===== (6-й шаг)
+        // ===== 8. НАСТРОЙКИ =====
         if (settings.settings && !window.shouldStop) {
             userLog('🔄 [6/7] Копирование настроек...');
             await fetch(`https://discord.com/api/v10/guilds/${targetId}`, {
@@ -571,7 +607,7 @@ async function startClone() {
             userLog('✅ Настройки скопированы');
         }
 
-        // ===== 9. AUTOMOD ===== (7-й шаг, последний)
+        // ===== 9. AUTOMOD =====
         if (settings.automod && !window.shouldStop) {
             userLog('🔄 [7/7] Копирование AutoMod...');
             try {
@@ -596,16 +632,13 @@ async function startClone() {
                         await sleep(500);
                     }
                     userLog(`✅ Скопировано ${rules.length} правил AutoMod`);
-                } else {
-                    userLog('⚠️ AutoMod правил не найдено');
                 }
             } catch (e) {
                 userLog('⚠️ AutoMod не поддерживается или нет прав');
-                devLog('AutoMod ошибка: ' + e.message);
             }
         }
 
-        userLog('🎉 Клонирование завершено! ВСЁ ПО ПОРЯДКУ!', 'done');
+        userLog('🎉 Клонирование завершено! ВСЁ ПО ПОРЯДКУ, ПРАВА СОХРАНЕНЫ!', 'done');
 
     } catch (error) {
         if (error.message === 'STOPPED') {
