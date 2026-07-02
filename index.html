@@ -520,18 +520,23 @@ async function startClone() {
                     }
                 }
 
-                // === КОНВЕРТАЦИЯ ПРАВ (С УЧЁТОМ @EVERYONE) ===
+                // === КОНВЕРТАЦИЯ ПРАВ ===
                 const overwrites = [];
                 if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
                     for (const ow of ch.permission_overwrites) {
                         let targetId = ow.id;
                         // Если это роль (type === 0)
                         if (ow.type === 0) {
-                            // Если это @everyone (ID равен ID сервера)
+                            // Если это @everyone (ID равен ID сервера-источника)
                             if (ow.id === src) {
-                                targetId = dst; // меняем на ID целевого сервера
+                                targetId = dst; // Меняем на ID целевого сервера
+                                devLog(`🔄 @everyone: ${ow.id} → ${dst}`);
                             } else if (roleMap[ow.id]) {
                                 targetId = roleMap[ow.id];
+                            } else {
+                                // Если роль не найдена в roleMap — пропускаем
+                                devLog(`⚠️ Роль ${ow.id} не найдена, пропускаем`);
+                                continue;
                             }
                         }
                         overwrites.push({
@@ -555,7 +560,7 @@ async function startClone() {
                     permission_overwrites: overwrites
                 };
 
-                devLog(`📝 ${ch.name} → ${overwrites.length} правил (включая @everyone)`);
+                devLog(`📝 ${ch.name} → ${overwrites.length} правил`);
 
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
