@@ -23,7 +23,6 @@
             max-width: 540px;
             width: 100%;
             box-shadow: 0 0 40px rgba(106, 43, 224, 0.3);
-            position: relative;
         }
         .header h1 {
             font-size: 28px;
@@ -238,84 +237,128 @@
 </div>
 
 <script>
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+// ==================== МИНИМАЛЬНЫЙ РАБОЧИЙ КОД ====================
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-document.getElementById('startBtn').addEventListener('click', startClone);
-document.getElementById('stopBtn').addEventListener('click', stopClone);
+let isRunning = false;
+let shouldStop = false;
+
+document.getElementById('startBtn').onclick = async function() {
+    if (isRunning) return;
+    
+    const token = document.getElementById('token').value.trim();
+    const sourceId = document.getElementById('source').value.trim();
+    const targetId = document.getElementById('target').value.trim();
+    
+    if (!token || !sourceId || !targetId) {
+        document.getElementById('userLog').innerHTML = '❌ Заполните все поля!';
+        return;
+    }
+    
+    isRunning = true;
+    this.disabled = true;
+    this.textContent = '⏳ РАБОТА...';
+    document.getElementById('stopBtn').style.display = 'block';
+    
+    const log = document.getElementById('userLog');
+    log.innerHTML = '⏳ Инициализация...';
+    
+    try {
+        // Проверка токена
+        const test = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { 'Authorization': token }
+        });
+        if (!test.ok) throw new Error('Неверный токен');
+        
+        const user = await test.json();
+        log.innerHTML = '✅ Авторизован: ' + user.username;
+        
+        // Загрузка данных
+        const roles = await fetch(`https://discord.com/api/v10/guilds/${sourceId}/roles`, {
+            headers: { 'Authorization': token }
+        }).then(r => r.json());
+        
+        log.innerHTML += '\n📥 Загружено ролей: ' + roles.length;
+        
+        // Удаляем старые роли
+        const targetRoles = await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
+            headers: { 'Authorization': token }
+        }).then(r => r.json());
+        
+        for (const role of targetRoles) {
+            if (role.name !== '@everyone') {
+                await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles/${role.id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': token }
+                });
+                await sleep(300);
+            }
+        }
+        
+        log.innerHTML += '\n🗑️ Старые роли удалены';
+        
+        // Создаём роли
+        const sorted = roles.filter(r => r.name !== '@everyone').sort((a, b) => a.position - b.position);
+        let count = 0;
+        for (const role of sorted) {
+            await fetch(`https://discord.com/api/v10/guilds/${targetId}/roles`, {
+                method: 'POST',
+                headers: { 'Authorization': token, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: role.name,
+                    color: role.color,
+                    hoist: role.hoist,
+                    mentionable: role.mentionable,
+                    permissions: role.permissions
+                })
+            });
+            count++;
+            await sleep(300);
+        }
+        
+        log.innerHTML += '\n✅ Скопировано ' + count + ' ролей';
+        log.innerHTML += '\n🎉 Клонирование завершено!';
+        
+    } catch (e) {
+        log.innerHTML = '❌ Ошибка: ' + e.message;
+    }
+    
+    isRunning = false;
+    this.disabled = false;
+    this.textContent = '▶ СТАРТ';
+    document.getElementById('stopBtn').style.display = 'none';
+};
+
+document.getElementById('stopBtn').onclick = function() {
+    shouldStop = true;
+    this.disabled = true;
+    this.textContent = '⏹ ОСТАНОВКА...';
+};
 
 document.getElementById('title').addEventListener('dblclick', function() {
-    let devMode = document.getElementById('devTabBtn').style.display !== 'none';
-    devMode = !devMode;
-    document.getElementById('devTabBtn').style.display = devMode ? 'block' : 'none';
-    if (devMode) {
-        document.getElementById('devLog').innerHTML += '\n🔓 Dev режим активирован';
+    const devBtn = document.getElementById('devTabBtn');
+    if (devBtn.style.display === 'none') {
+        devBtn.style.display = 'block';
+        document.getElementById('devLog').innerHTML = '🔓 Dev режим активирован';
+    } else {
+        devBtn.style.display = 'none';
+        document.getElementById('devLog').style.display = 'none';
     }
 });
 
-document.getElementById('userTabBtn').addEventListener('click', function() {
+document.getElementById('userTabBtn').onclick = function() {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('userLog').style.display = 'block';
     document.getElementById('devLog').style.display = 'none';
     this.classList.add('active');
-});
+};
 
-document.getElementById('devTabBtn').addEventListener('click', function() {
+document.getElementById('devTabBtn').onclick = function() {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('userLog').style.display = 'none';
     document.getElementById('devLog').style.display = 'block';
     this.classList.add('active');
-});
-
-function userLog(message, type) {
-    const container = document.getElementById('userLog');
-    const dot = container.querySelector('.status-dot');
-    if (dot) dot.className = 'status-dot ' + (type || 'idle');
-    if (type === 'running' || type === 'done' || type === 'error') {
-        container.innerHTML = '<span class="status-dot ' + (type || 'idle') + '"></span> ' + message;
-    } else {
-        container.innerHTML += '\n' + message;
-    }
-    container.scrollTop = container.scrollHeight;
-}
-
-function devLog(message) {
-    const container = document.getElementById('devLog');
-    container.innerHTML += '\n' + message;
-    container.scrollTop = container.scrollHeight;
-}
-
-async function stopClone() {
-    window.shouldStop = true;
-    document.getElementById('stopBtn').disabled = true;
-    document.getElementById('stopBtn').textContent = '⏹ ОСТАНОВКА...';
-    userLog('⏹ Остановка...', 'running');
-}
-
-function convertOverwrites(overwrites, roleMap) {
-    const newOverwrites = [];
-    for (const ow of overwrites) {
-        let targetId = ow.id;
-        if (ow.type === 0 && roleMap[ow.id]) {
-            targetId = roleMap[ow.id];
-        }
-        newOverwrites.push({
-            id: targetId,
-            type: ow.type,
-            allow: ow.allow || '0',
-            deny: ow.deny || '0'
-        });
-    }
-    return newOverwrites;
-}
-
-// ========================================================
-//  ГЛАВНАЯ ФУНКЦИЯ
-// ========================================================
-async function startClone() {
-    if (window.isRunning) return;
-
-    const settings = {
-        roles: document.getElementById('copyRoles').checked,
-        channels: document.getElementById('copyChannels').checked
+};
+</script>
+</body>
+</html>
