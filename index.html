@@ -194,7 +194,7 @@
 
     <div class="input-group">
         <label>🔑 Token</label>
-        <input type="text" id="token" placeholder="Введите токен бота...">
+        <input type="text" id="token" placeholder="Введите токен...">
     </div>
     <div class="input-group">
         <label>📂 Source Server ID</label>
@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  ULTIMATE FIX — РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
+//  ФИНАЛЬНЫЙ КОД: РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -304,6 +304,7 @@ async function stopClone() {
     log('⏹ Остановка...', 'running');
 }
 
+// ===== ОСНОВНАЯ ФУНКЦИЯ =====
 async function startClone() {
     if (isRunning) return;
 
@@ -390,10 +391,11 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ =====
+        // ===== 4. РОЛИ (ГАРАНТИРОВАННЫЙ ПОРЯДОК) =====
         if (settings.roles && !shouldStop) {
-            log('🔄 [2/7] Копирование ролей...');
+            log('🔄 [2/7] Копирование ролей с сохранением порядка...');
 
+            // Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -409,12 +411,14 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            const sorted = roles
+            // СОРТИРУЕМ ПО ПОЗИЦИИ (от меньшей к большей)
+            const sortedRoles = roles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => a.position - b.position);
 
+            // СОЗДАЁМ РОЛИ
             let count = 0;
-            for (const r of sorted) {
+            for (const r of sortedRoles) {
                 if (shouldStop) throw new Error('STOP');
                 const newRole = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                     method: 'POST',
@@ -434,12 +438,13 @@ async function startClone() {
             }
             log(`✅ Создано ${count} ролей`);
 
-            // Принудительная перестановка
+            // ===== ПРИНУДИТЕЛЬНАЯ ПЕРЕСТАНОВКА =====
             devLog('🔄 Принудительная перестановка ролей...');
             const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
 
+            // Сортируем созданные роли по позиции на исходнике
             const sortedCreated = createdRoles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => {
@@ -448,6 +453,7 @@ async function startClone() {
                     return posA - posB;
                 });
 
+            // Устанавливаем позиции
             let pos = 0;
             for (const r of sortedCreated) {
                 if (shouldStop) throw new Error('STOP');
@@ -522,7 +528,7 @@ async function startClone() {
                     }
                 }
 
-                // === ПРАВА КАНАЛА ===
+                // === КОНВЕРТАЦИЯ ПРАВ ===
                 const overwrites = [];
                 if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
                     for (const ow of ch.permission_overwrites) {
@@ -551,7 +557,7 @@ async function startClone() {
                     permission_overwrites: overwrites
                 };
 
-                devLog(`📝 ${ch.name} → ${overwrites.length} прав`);
+                devLog(`📝 ${ch.name} → ${overwrites.length} правил`);
 
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
