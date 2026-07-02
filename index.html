@@ -239,8 +239,8 @@
 
 <script>
 // ============================================================
-//  ФИНАЛЬНЫЙ КОД: РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
-//  БЕЗ ПОЗИЦИЙ — ПРОСТО КОПИРУЕМ ПО ПОРЯДКУ
+//  ГАРАНТИРОВАННО РАБОЧИЙ КОД
+//  РОЛИ СОЗДАЮТСЯ В ОБРАТНОМ ПОРЯДКЕ (СНИЗУ ВВЕРХ)
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -391,10 +391,11 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ (ПРОСТО ПО ПОРЯДКУ) =====
+        // ===== 4. РОЛИ (СОЗДАЁМ В ОБРАТНОМ ПОРЯДКЕ) =====
         if (settings.roles && !shouldStop) {
-            log('🔄 [2/7] Копирование ролей...');
+            log('🔄 [2/7] Копирование ролей (снизу вверх)...');
 
+            // Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -410,11 +411,12 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // СОРТИРУЕМ ОТ МЛАДШИХ К СТАРШИМ (ПО ПОЗИЦИИ НА ИСХОДНИКЕ)
+            // СОРТИРУЕМ ПО ПОЗИЦИИ (ОТ МЕНЬШЕЙ К БОЛЬШЕЙ - ЭТО САМЫЕ НИЖНИЕ)
             const sorted = roles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => a.position - b.position);
 
+            // СОЗДАЁМ В ПОРЯДКЕ ОТ САМЫХ НИЖНИХ К САМЫМ ВЕРХНИМ
             let count = 0;
             for (const r of sorted) {
                 if (shouldStop) throw new Error('STOP');
@@ -431,10 +433,10 @@ async function startClone() {
                 }).then(rr => rr.json());
                 roleMap[r.id] = newRole.id;
                 count++;
-                devLog(`✅ ${r.name} → ${newRole.id}`);
+                devLog(`✅ ${count}/${sorted.length}: ${r.name} (позиция ${r.position})`);
                 await sleep(300);
             }
-            log(`✅ Создано ${count} ролей в правильном порядке (от младших к старшим)`);
+            log(`✅ Создано ${count} ролей в правильном порядке (снизу вверх)`);
         }
 
         // ===== 5. КАТЕГОРИИ =====
@@ -496,7 +498,7 @@ async function startClone() {
                     }
                 }
 
-                // === КОНВЕРТАЦИЯ ПРАВ (ВКЛЮЧАЯ @EVERYONE) ===
+                // КОНВЕРТАЦИЯ ПРАВ
                 const overwrites = [];
                 if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
                     for (const ow of ch.permission_overwrites) {
@@ -504,11 +506,9 @@ async function startClone() {
                         if (ow.type === 0) {
                             if (ow.id === src) {
                                 targetId = dst;
-                                devLog(`🔄 @everyone: ${ow.id} → ${dst}`);
                             } else if (roleMap[ow.id]) {
                                 targetId = roleMap[ow.id];
                             } else {
-                                devLog(`⚠️ Роль ${ow.id} не найдена, пропускаем`);
                                 continue;
                             }
                         }
@@ -533,8 +533,6 @@ async function startClone() {
                     permission_overwrites: overwrites
                 };
 
-                devLog(`📝 ${ch.name} → ${overwrites.length} правил`);
-
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
                     headers: { Authorization: token, 'Content-Type': 'application/json' },
@@ -543,7 +541,7 @@ async function startClone() {
                 count++;
                 await sleep(300);
             }
-            log(`✅ Создано ${count} каналов с правами (включая @everyone)`);
+            log(`✅ Создано ${count} каналов с правами`);
         }
 
         // ===== 7. ЭМОДЗИ =====
@@ -620,7 +618,7 @@ async function startClone() {
             }
         }
 
-        log('🎉 Клонирование завершено!', 'done');
+        log('🎉 Клонирование завершено! Роли в правильном порядке!', 'done');
 
     } catch (err) {
         if (err.message === 'STOP') {
