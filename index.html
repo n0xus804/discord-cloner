@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  ФИНАЛЬНЫЙ КОД: РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
+//  РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ (ВКЛЮЧАЯ @EVERYONE)
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -247,6 +247,7 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 let isRunning = false;
 let shouldStop = false;
 let roleMap = {};
+let targetGuildId = null;
 
 document.getElementById('startBtn').addEventListener('click', startClone);
 document.getElementById('stopBtn').addEventListener('click', stopClone);
@@ -331,6 +332,7 @@ async function startClone() {
     isRunning = true;
     shouldStop = false;
     roleMap = {};
+    targetGuildId = dst;
     document.getElementById('startBtn').disabled = true;
     document.getElementById('startBtn').textContent = '⏳ РАБОТА...';
     document.getElementById('stopBtn').className = 'btn btn-stop show';
@@ -391,11 +393,10 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ (ПРИНУДИТЕЛЬНАЯ ПЕРЕСТАНОВКА) =====
+        // ===== 4. РОЛИ =====
         if (settings.roles && !shouldStop) {
             log('🔄 [2/7] Копирование ролей...');
 
-            // 1. Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -411,7 +412,6 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // 2. СОЗДАЁМ РОЛИ (в любом порядке)
             const rolesToCreate = roles.filter(r => r.name !== '@everyone');
             for (const r of rolesToCreate) {
                 if (shouldStop) throw new Error('STOP');
@@ -432,15 +432,12 @@ async function startClone() {
             }
             log(`✅ Создано ${rolesToCreate.length} ролей`);
 
-            // 3. ЖДЁМ 2 СЕКУНДЫ
+            // Принудительная перестановка
             await sleep(2000);
-
-            // 4. ПОЛУЧАЕМ СПИСОК СОЗДАННЫХ РОЛЕЙ
             const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
 
-            // 5. СОРТИРУЕМ ПО ПОЗИЦИИ НА ИСХОДНИКЕ (ОТ БОЛЬШЕЙ К МЕНЬШЕЙ)
             const sortedForReorder = createdRoles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => {
@@ -449,7 +446,6 @@ async function startClone() {
                     return posB - posA;
                 });
 
-            // 6. ПЕРЕСТАВЛЯЕМ
             let pos = sortedForReorder.length - 1;
             for (const r of sortedForReorder) {
                 if (shouldStop) throw new Error('STOP');
@@ -494,9 +490,9 @@ async function startClone() {
             log('✅ Категории скопированы');
         }
 
-        // ===== 6. КАНАЛЫ С ПРАВАМИ =====
+        // ===== 6. КАНАЛЫ С ПРАВАМИ (ВКЛЮЧАЯ @EVERYONE) =====
         if ((settings.channels || settings.voice) && !shouldStop) {
-            log('🔄 [4/7] Копирование каналов с правами...');
+            log('🔄 [4/7] Копирование каналов с правами (включая @everyone)...');
 
             const newChannels = await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                 headers: { Authorization: token }
@@ -524,13 +520,19 @@ async function startClone() {
                     }
                 }
 
-                // === КОНВЕРТАЦИЯ ПРАВ ===
+                // === КОНВЕРТАЦИЯ ПРАВ (С УЧЁТОМ @EVERYONE) ===
                 const overwrites = [];
                 if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
                     for (const ow of ch.permission_overwrites) {
                         let targetId = ow.id;
-                        if (ow.type === 0 && roleMap[ow.id]) {
-                            targetId = roleMap[ow.id];
+                        // Если это роль (type === 0)
+                        if (ow.type === 0) {
+                            // Если это @everyone (ID равен ID сервера)
+                            if (ow.id === src) {
+                                targetId = dst; // меняем на ID целевого сервера
+                            } else if (roleMap[ow.id]) {
+                                targetId = roleMap[ow.id];
+                            }
                         }
                         overwrites.push({
                             id: targetId,
@@ -553,7 +555,7 @@ async function startClone() {
                     permission_overwrites: overwrites
                 };
 
-                devLog(`📝 ${ch.name} → ${overwrites.length} правил`);
+                devLog(`📝 ${ch.name} → ${overwrites.length} правил (включая @everyone)`);
 
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
@@ -563,7 +565,7 @@ async function startClone() {
                 count++;
                 await sleep(300);
             }
-            log(`✅ Создано ${count} каналов с правами`);
+            log(`✅ Создано ${count} каналов с правами (включая @everyone)`);
         }
 
         // ===== 7. ЭМОДЗИ =====
