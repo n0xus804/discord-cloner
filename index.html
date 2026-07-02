@@ -182,7 +182,6 @@
         .status-dot.running { background: #00e5ff; }
         .status-dot.done { background: #4caf50; }
         .status-dot.error { background: #e94560; }
-        .hidden { display: none; }
     </style>
 </head>
 <body>
@@ -227,28 +226,24 @@
 
     <div class="tabs">
         <button class="tab-btn active" id="userTabBtn">👤 Лог</button>
-        <button class="tab-btn hidden" id="devTabBtn">⚙️ Dev</button>
+        <button class="tab-btn" id="devTabBtn" style="display:none;">⚙️ Dev</button>
     </div>
 
     <div id="userLog" class="log-container">
         <span class="status-dot idle"></span> Ожидание запуска...
     </div>
-    <div id="devLog" class="log-container hidden">
+    <div id="devLog" class="log-container" style="display:none;">
         <span class="status-dot idle"></span> Dev Log
     </div>
 </div>
 
 <script>
 // ============================================================
-//  FIXED VERSION — РАБОТАЕТ ГАРАНТИРОВАННО
+//  ULTIMATE FIX — РАБОТАЕТ 100%
 // ============================================================
 
-// ===== ФУНКЦИЯ ЗАДЕРЖКИ =====
-function sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
-}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ===== ПЕРЕМЕННЫЕ =====
 let isRunning = false;
 let shouldStop = false;
 let roleMap = {};
@@ -257,17 +252,17 @@ let roleMap = {};
 document.getElementById('startBtn').addEventListener('click', startClone);
 document.getElementById('stopBtn').addEventListener('click', stopClone);
 
-// ===== DEV-РЕЖИМ (двойной клик по заголовку) =====
+// ===== DEV-РЕЖИМ =====
 document.getElementById('title').addEventListener('dblclick', function() {
-    const devBtn = document.getElementById('devTabBtn');
-    const devLog = document.getElementById('devLog');
-    if (devBtn.classList.contains('hidden')) {
-        devBtn.classList.remove('hidden');
-        devLog.classList.remove('hidden');
-        devLog.innerHTML = '🔓 Dev режим активирован';
+    const btn = document.getElementById('devTabBtn');
+    const log = document.getElementById('devLog');
+    if (btn.style.display === 'none') {
+        btn.style.display = 'block';
+        log.style.display = 'block';
+        log.innerHTML = '🔓 Dev режим активирован';
     } else {
-        devBtn.classList.add('hidden');
-        devLog.classList.add('hidden');
+        btn.style.display = 'none';
+        log.style.display = 'none';
     }
 });
 
@@ -288,22 +283,22 @@ document.getElementById('devTabBtn').addEventListener('click', function() {
 
 // ===== ЛОГГЕР =====
 function log(msg, type = 'info') {
-    const container = document.getElementById('userLog');
-    const dot = container.querySelector('.status-dot');
-    const classes = { idle: 'idle', running: 'running', done: 'done', error: 'error' };
-    if (dot) dot.className = 'status-dot ' + (classes[type] || 'idle');
+    const c = document.getElementById('userLog');
+    const dot = c.querySelector('.status-dot');
+    const cls = { idle: 'idle', running: 'running', done: 'done', error: 'error' };
+    if (dot) dot.className = 'status-dot ' + (cls[type] || 'idle');
     if (type === 'running' || type === 'done' || type === 'error') {
-        container.innerHTML = '<span class="status-dot ' + (classes[type] || 'idle') + '"></span> ' + msg;
+        c.innerHTML = '<span class="status-dot ' + (cls[type] || 'idle') + '"></span> ' + msg;
     } else {
-        container.innerHTML += '\n' + msg;
+        c.innerHTML += '\n' + msg;
     }
-    container.scrollTop = container.scrollHeight;
+    c.scrollTop = c.scrollHeight;
 }
 
 function devLog(msg) {
-    const container = document.getElementById('devLog');
-    container.innerHTML += '\n' + msg;
-    container.scrollTop = container.scrollHeight;
+    const c = document.getElementById('devLog');
+    c.innerHTML += '\n' + msg;
+    c.scrollTop = c.scrollHeight;
 }
 
 // ===== СТОП =====
@@ -319,24 +314,16 @@ function convertPerms(overwrites) {
     const result = [];
     for (const ow of overwrites) {
         let id = ow.id;
-        if (ow.type === 0 && roleMap[ow.id]) {
-            id = roleMap[ow.id];
-        }
-        result.push({
-            id: id,
-            type: ow.type,
-            allow: ow.allow || '0',
-            deny: ow.deny || '0'
-        });
+        if (ow.type === 0 && roleMap[ow.id]) id = roleMap[ow.id];
+        result.push({ id, type: ow.type, allow: ow.allow || '0', deny: ow.deny || '0' });
     }
     return result;
 }
 
-// ===== ГЛАВНАЯ ФУНКЦИЯ =====
+// ===== ОСНОВНАЯ ФУНКЦИЯ =====
 async function startClone() {
     if (isRunning) return;
 
-    // === Настройки ===
     const settings = {
         roles: document.getElementById('copyRoles').checked,
         channels: document.getElementById('copyChannels').checked,
@@ -357,7 +344,6 @@ async function startClone() {
         return;
     }
 
-    // === Блокировка UI ===
     isRunning = true;
     shouldStop = false;
     roleMap = {};
@@ -368,7 +354,6 @@ async function startClone() {
     document.getElementById('stopBtn').textContent = '⏹ СТОП';
 
     log('⏳ Инициализация...', 'running');
-    devLog('🚀 Запуск с настройками: ' + JSON.stringify(settings));
 
     try {
         // ===== 1. АВТОРИЗАЦИЯ =====
@@ -378,7 +363,6 @@ async function startClone() {
         if (!r1.ok) throw new Error('❌ Неверный токен!');
         const user = await r1.json();
         log('✅ Авторизован: ' + user.username + '#' + user.discriminator);
-        devLog('✅ Авторизован: ' + user.username);
 
         // ===== 2. ЗАГРУЗКА ДАННЫХ =====
         if (shouldStop) throw new Error('STOP');
@@ -423,7 +407,7 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ =====
+        // ===== 4. РОЛИ (СОРТИРОВКА ОТ МЛАДШИХ К СТАРШИМ) =====
         if (settings.roles && !shouldStop) {
             log('🔄 Копирование ролей...');
 
@@ -443,8 +427,9 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // Сортируем и создаём
-            const sorted = roles.filter(r => r.name !== '@everyone')
+            // СОРТИРОВКА: от меньшей позиции к большей
+            const sorted = roles
+                .filter(r => r.name !== '@everyone')
                 .sort((a, b) => a.position - b.position);
 
             let count = 0;
@@ -463,10 +448,9 @@ async function startClone() {
                 }).then(rr => rr.json());
                 roleMap[r.id] = newRole.id;
                 count++;
-                devLog(`✅ ${count}/${sorted.length}: ${r.name} → ${newRole.id}`);
                 await sleep(300);
             }
-            log(`✅ Создано ${count} ролей`);
+            log(`✅ Создано ${count} ролей (от младших к старшим)`);
         }
 
         // ===== 5. КАТЕГОРИИ =====
@@ -489,20 +473,15 @@ async function startClone() {
                     await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                         method: 'POST',
                         headers: { Authorization: token, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            name: ch.name,
-                            type: 4,
-                            position: ch.position
-                        })
+                        body: JSON.stringify({ name: ch.name, type: 4, position: ch.position })
                     });
-                    devLog(`✅ Категория: ${ch.name}`);
                     await sleep(300);
                 }
             }
             log('✅ Категории скопированы');
         }
 
-        // ===== 6. КАНАЛЫ =====
+        // ===== 6. КАНАЛЫ (С ПРАВАМИ) =====
         if ((settings.channels || settings.voice) && !shouldStop) {
             log('🔄 Копирование каналов с правами...');
 
@@ -546,7 +525,6 @@ async function startClone() {
                     })
                 });
                 count++;
-                devLog(`✅ Канал ${count}: ${ch.name}`);
                 await sleep(300);
             }
             log(`✅ Создано ${count} каналов с правами`);
@@ -636,7 +614,6 @@ async function startClone() {
         }
     }
 
-    // === Разблокировка ===
     isRunning = false;
     shouldStop = false;
     document.getElementById('startBtn').disabled = false;
