@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  ULTIMATE FIX — РАБОТАЕТ 100%
+//  ULTIMATE FIX — ПРИНУДИТЕЛЬНАЯ СОРТИРОВКА РОЛЕЙ
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -248,11 +248,9 @@ let isRunning = false;
 let shouldStop = false;
 let roleMap = {};
 
-// ===== КНОПКИ =====
 document.getElementById('startBtn').addEventListener('click', startClone);
 document.getElementById('stopBtn').addEventListener('click', stopClone);
 
-// ===== DEV-РЕЖИМ =====
 document.getElementById('title').addEventListener('dblclick', function() {
     const btn = document.getElementById('devTabBtn');
     const log = document.getElementById('devLog');
@@ -266,7 +264,6 @@ document.getElementById('title').addEventListener('dblclick', function() {
     }
 });
 
-// ===== ВКЛАДКИ =====
 document.getElementById('userTabBtn').addEventListener('click', function() {
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.getElementById('userLog').style.display = 'block';
@@ -281,7 +278,6 @@ document.getElementById('devTabBtn').addEventListener('click', function() {
     this.classList.add('active');
 });
 
-// ===== ЛОГГЕР =====
 function log(msg, type = 'info') {
     const c = document.getElementById('userLog');
     const dot = c.querySelector('.status-dot');
@@ -301,7 +297,6 @@ function devLog(msg) {
     c.scrollTop = c.scrollHeight;
 }
 
-// ===== СТОП =====
 async function stopClone() {
     shouldStop = true;
     document.getElementById('stopBtn').disabled = true;
@@ -309,7 +304,6 @@ async function stopClone() {
     log('⏹ Остановка...', 'running');
 }
 
-// ===== КОНВЕРТАЦИЯ ПРАВ =====
 function convertPerms(overwrites) {
     const result = [];
     for (const ow of overwrites) {
@@ -320,7 +314,6 @@ function convertPerms(overwrites) {
     return result;
 }
 
-// ===== ОСНОВНАЯ ФУНКЦИЯ =====
 async function startClone() {
     if (isRunning) return;
 
@@ -407,7 +400,7 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ (СОРТИРОВКА ОТ МЛАДШИХ К СТАРШИМ) =====
+        // ===== 4. РОЛИ =====
         if (settings.roles && !shouldStop) {
             log('🔄 Копирование ролей...');
 
@@ -427,13 +420,9 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // СОРТИРОВКА: от меньшей позиции к большей
-            const sorted = roles
-                .filter(r => r.name !== '@everyone')
-                .sort((a, b) => a.position - b.position);
-
-            let count = 0;
-            for (const r of sorted) {
+            // СОЗДАЁМ РОЛИ
+            const filtered = roles.filter(r => r.name !== '@everyone');
+            for (const r of filtered) {
                 if (shouldStop) throw new Error('STOP');
                 const newRole = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                     method: 'POST',
@@ -447,10 +436,39 @@ async function startClone() {
                     })
                 }).then(rr => rr.json());
                 roleMap[r.id] = newRole.id;
-                count++;
                 await sleep(300);
             }
-            log(`✅ Создано ${count} ролей (от младших к старшим)`);
+            log(`✅ Создано ${filtered.length} ролей`);
+
+            // ===== ПРИНУДИТЕЛЬНАЯ ПЕРЕСТАНОВКА =====
+            devLog('🔄 Принудительная перестановка ролей...');
+            const createdRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
+                headers: { Authorization: token }
+            }).then(r => r.json());
+
+            // Сортируем по позиции на исходнике
+            const sorted = createdRoles
+                .filter(r => r.name !== '@everyone')
+                .sort((a, b) => {
+                    const posA = roles.find(r => r.name === a.name)?.position || 0;
+                    const posB = roles.find(r => r.name === b.name)?.position || 0;
+                    return posA - posB;
+                });
+
+            // Устанавливаем позиции
+            let pos = 0;
+            for (const r of sorted) {
+                if (shouldStop) throw new Error('STOP');
+                await fetch(`https://discord.com/api/v10/guilds/${dst}/roles/${r.id}`, {
+                    method: 'PATCH',
+                    headers: { Authorization: token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ position: pos })
+                });
+                devLog(`✅ ${r.name} → позиция ${pos}`);
+                pos++;
+                await sleep(300);
+            }
+            log(`✅ Роли переставлены в правильном порядке!`);
         }
 
         // ===== 5. КАТЕГОРИИ =====
@@ -481,7 +499,7 @@ async function startClone() {
             log('✅ Категории скопированы');
         }
 
-        // ===== 6. КАНАЛЫ (С ПРАВАМИ) =====
+        // ===== 6. КАНАЛЫ =====
         if ((settings.channels || settings.voice) && !shouldStop) {
             log('🔄 Копирование каналов с правами...');
 
@@ -604,7 +622,7 @@ async function startClone() {
             }
         }
 
-        log('🎉 Клонирование завершено!', 'done');
+        log('🎉 Клонирование завершено! Роли переставлены принудительно!', 'done');
 
     } catch (err) {
         if (err.message === 'STOP') {
