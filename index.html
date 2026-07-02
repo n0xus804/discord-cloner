@@ -194,7 +194,7 @@
 
     <div class="input-group">
         <label>🔑 Token</label>
-        <input type="text" id="token" placeholder="Введите токен...">
+        <input type="text" id="token" placeholder="Введите токен бота...">
     </div>
     <div class="input-group">
         <label>📂 Source Server ID</label>
@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  ULTIMATE FIX — ПРИНУДИТЕЛЬНАЯ СОРТИРОВКА РОЛЕЙ
+//  FIXED: РОЛИ ПО ПОРЯДКУ + ПРАВА КАНАЛОВ
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -304,12 +304,21 @@ async function stopClone() {
     log('⏹ Остановка...', 'running');
 }
 
+// ===== КОНВЕРТАЦИЯ ПРАВ (С ПОДСТАНОВКОЙ НОВЫХ ID РОЛЕЙ) =====
 function convertPerms(overwrites) {
     const result = [];
     for (const ow of overwrites) {
         let id = ow.id;
-        if (ow.type === 0 && roleMap[ow.id]) id = roleMap[ow.id];
-        result.push({ id, type: ow.type, allow: ow.allow || '0', deny: ow.deny || '0' });
+        // Если это роль (type === 0) и есть в roleMap — заменяем ID
+        if (ow.type === 0 && roleMap[ow.id]) {
+            id = roleMap[ow.id];
+        }
+        result.push({
+            id: id,
+            type: ow.type,
+            allow: ow.allow || '0',
+            deny: ow.deny || '0'
+        });
     }
     return result;
 }
@@ -385,7 +394,7 @@ async function startClone() {
 
         // ===== 3. ИКОНКА =====
         if (settings.icon && guild.icon && !shouldStop) {
-            log('🔄 Копирование иконки...');
+            log('🔄 [1/7] Копирование иконки...');
             const img = await fetch(`https://cdn.discordapp.com/icons/${src}/${guild.icon}.png`)
                 .then(r => r.arrayBuffer());
             const b64 = btoa(String.fromCharCode(...new Uint8Array(img)));
@@ -400,9 +409,9 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ =====
+        // ===== 4. РОЛИ (СОРТИРОВКА И ПЕРЕСТАНОВКА) =====
         if (settings.roles && !shouldStop) {
-            log('🔄 Копирование ролей...');
+            log('🔄 [2/7] Копирование ролей...');
 
             // Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
@@ -420,9 +429,14 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
+            // СОРТИРУЕМ от младших к старшим
+            const sorted = roles
+                .filter(r => r.name !== '@everyone')
+                .sort((a, b) => a.position - b.position);
+
             // СОЗДАЁМ РОЛИ
-            const filtered = roles.filter(r => r.name !== '@everyone');
-            for (const r of filtered) {
+            let count = 0;
+            for (const r of sorted) {
                 if (shouldStop) throw new Error('STOP');
                 const newRole = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                     method: 'POST',
@@ -436,9 +450,11 @@ async function startClone() {
                     })
                 }).then(rr => rr.json());
                 roleMap[r.id] = newRole.id;
+                count++;
+                devLog(`✅ ${r.name} → ${newRole.id}`);
                 await sleep(300);
             }
-            log(`✅ Создано ${filtered.length} ролей`);
+            log(`✅ Создано ${count} ролей`);
 
             // ===== ПРИНУДИТЕЛЬНАЯ ПЕРЕСТАНОВКА =====
             devLog('🔄 Принудительная перестановка ролей...');
@@ -446,8 +462,7 @@ async function startClone() {
                 headers: { Authorization: token }
             }).then(r => r.json());
 
-            // Сортируем по позиции на исходнике
-            const sorted = createdRoles
+            const sortedCreated = createdRoles
                 .filter(r => r.name !== '@everyone')
                 .sort((a, b) => {
                     const posA = roles.find(r => r.name === a.name)?.position || 0;
@@ -455,9 +470,8 @@ async function startClone() {
                     return posA - posB;
                 });
 
-            // Устанавливаем позиции
             let pos = 0;
-            for (const r of sorted) {
+            for (const r of sortedCreated) {
                 if (shouldStop) throw new Error('STOP');
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/roles/${r.id}`, {
                     method: 'PATCH',
@@ -473,7 +487,7 @@ async function startClone() {
 
         // ===== 5. КАТЕГОРИИ =====
         if (settings.categories && !shouldStop) {
-            log('🔄 Копирование категорий...');
+            log('🔄 [3/7] Копирование категорий...');
             const oldChannels = await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -493,16 +507,18 @@ async function startClone() {
                         headers: { Authorization: token, 'Content-Type': 'application/json' },
                         body: JSON.stringify({ name: ch.name, type: 4, position: ch.position })
                     });
+                    devLog(`✅ Категория: ${ch.name}`);
                     await sleep(300);
                 }
             }
             log('✅ Категории скопированы');
         }
 
-        // ===== 6. КАНАЛЫ =====
+        // ===== 6. КАНАЛЫ С ПРАВАМИ =====
         if ((settings.channels || settings.voice) && !shouldStop) {
-            log('🔄 Копирование каналов с правами...');
+            log('🔄 [4/7] Копирование каналов с правами...');
 
+            // Получаем созданные категории для маппинга
             const newChannels = await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -521,11 +537,16 @@ async function startClone() {
                 if (shouldStop) throw new Error('STOP');
                 if (!types.includes(ch.type)) continue;
 
-                const parentId = ch.parent_id
-                    ? catMap[channels.find(c => c.id === ch.parent_id)?.name]
-                    : null;
+                // Находим ID родительской категории по имени
+                let parentId = null;
+                if (ch.parent_id) {
+                    const parent = channels.find(c => c.id === ch.parent_id);
+                    if (parent) parentId = catMap[parent.name];
+                }
 
+                // КОНВЕРТИРУЕМ ПРАВА
                 const perms = convertPerms(ch.permission_overwrites || []);
+                devLog(`🔑 Права для ${ch.name}: ${perms.length} записей`);
 
                 await fetch(`https://discord.com/api/v10/guilds/${dst}/channels`, {
                     method: 'POST',
@@ -543,6 +564,7 @@ async function startClone() {
                     })
                 });
                 count++;
+                devLog(`✅ Канал: ${ch.name} (${ch.type === 0 ? 'текстовый' : 'голосовой'})`);
                 await sleep(300);
             }
             log(`✅ Создано ${count} каналов с правами`);
@@ -550,7 +572,7 @@ async function startClone() {
 
         // ===== 7. ЭМОДЗИ =====
         if (settings.emojis && emojis.length > 0 && !shouldStop) {
-            log(`🔄 Копирование ${emojis.length} эмодзи...`);
+            log(`🔄 [5/7] Копирование ${emojis.length} эмодзи...`);
             let count = 0;
             for (const e of emojis) {
                 if (shouldStop) throw new Error('STOP');
@@ -578,7 +600,7 @@ async function startClone() {
 
         // ===== 8. НАСТРОЙКИ =====
         if (settings.settings && !shouldStop) {
-            log('🔄 Копирование настроек...');
+            log('🔄 [6/7] Копирование настроек...');
             await fetch(`https://discord.com/api/v10/guilds/${dst}`, {
                 method: 'PATCH',
                 headers: { Authorization: token, 'Content-Type': 'application/json' },
@@ -594,7 +616,7 @@ async function startClone() {
 
         // ===== 9. AUTOMOD =====
         if (settings.automod && !shouldStop) {
-            log('🔄 Копирование AutoMod...');
+            log('🔄 [7/7] Копирование AutoMod...');
             try {
                 const rules = await fetch(`https://discord.com/api/v10/guilds/${src}/automod/rules`, {
                     headers: { Authorization: token }
@@ -622,7 +644,7 @@ async function startClone() {
             }
         }
 
-        log('🎉 Клонирование завершено! Роли переставлены принудительно!', 'done');
+        log('🎉 Клонирование завершено!', 'done');
 
     } catch (err) {
         if (err.message === 'STOP') {
