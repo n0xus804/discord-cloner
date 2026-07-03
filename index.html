@@ -239,7 +239,7 @@
 
 <script>
 // ============================================================
-//  ABSOLUTELY FINAL — РОЛИ В ТОЧНОМ ПОРЯДКЕ
+//  ФИНАЛ: РОЛИ В ТОЧНОМ ПОРЯДКЕ ЧЕРЕЗ reverse()
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -390,11 +390,11 @@ async function startClone() {
             log('✅ Иконка скопирована');
         }
 
-        // ===== 4. РОЛИ (ГАРАНТИРОВАННЫЙ ПОРЯДОК) =====
+        // ===== 4. РОЛИ (reverse() - ГАРАНТИРОВАННЫЙ ПОРЯДОК) =====
         if (settings.roles && !shouldStop) {
             log('🔄 [2/7] Копирование ролей...');
 
-            // 1. Удаляем старые роли
+            // Удаляем старые роли
             const oldRoles = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
                 headers: { Authorization: token }
             }).then(r => r.json());
@@ -410,12 +410,13 @@ async function startClone() {
             }
             devLog('🗑️ Старые роли удалены');
 
-            // 2. Получаем роли, сортируем по позиции (от меньшей к большей)
+            // СОРТИРУЕМ ПО ПОЗИЦИИ (ОТ БОЛЬШЕЙ К МЕНЬШЕЙ - ОТ ВЕРХНИХ К НИЖНИМ)
             const sorted = roles
                 .filter(r => r.name !== '@everyone')
-                .sort((a, b) => a.position - b.position);
+                .sort((a, b) => b.position - a.position);
 
-            // 3. СОЗДАЁМ В ПОРЯДКЕ ОТ САМЫХ НИЖНИХ К САМЫМ ВЕРХНИМ
+            // СОЗДАЁМ В ПОРЯДКЕ ОТ САМЫХ ВЕРХНИХ К САМЫМ НИЖНИМ
+            let count = 0;
             for (const r of sorted) {
                 if (shouldStop) throw new Error('STOP');
                 const newRole = await fetch(`https://discord.com/api/v10/guilds/${dst}/roles`, {
@@ -430,10 +431,11 @@ async function startClone() {
                     })
                 }).then(rr => rr.json());
                 roleMap[r.id] = newRole.id;
-                devLog(`✅ Создана: ${r.name}`);
+                count++;
+                devLog(`✅ ${count}/${sorted.length}: ${r.name} (позиция ${r.position})`);
                 await sleep(300);
             }
-            log(`✅ Все роли созданы в правильном порядке (снизу вверх)`);
+            log(`✅ Создано ${count} ролей в правильном порядке (сверху вниз)`);
         }
 
         // ===== 5. КАТЕГОРИИ =====
@@ -495,7 +497,6 @@ async function startClone() {
                     }
                 }
 
-                // КОНВЕРТАЦИЯ ПРАВ
                 const overwrites = [];
                 if (ch.permission_overwrites && ch.permission_overwrites.length > 0) {
                     for (const ow of ch.permission_overwrites) {
